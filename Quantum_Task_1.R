@@ -6,9 +6,12 @@ library(readxl)
 library(tidytext)
 library(dplyr)
 library(ggplot2)
-
+library(arules)
+# get working directory
 getwd()
+
 filepath <- "C:/Users/PRAISE/Documents/R_Forcast/Personal_Project"
+
 
 transactionData <- read_excel("QVI_transaction_data.xlsx")
 customerData <- read.csv("QVI_purchase_behaviour.csv")
@@ -142,6 +145,27 @@ transactionData <- transactionData %>%
 transactionData <- transactionData %>%
   mutate(BRAND = if_else(BRAND == "Smith", "Smiths", BRAND))
 
+transactionData <- transactionData %>%
+  mutate(BRAND = if_else(BRAND == "Snbts", "Sunbites", BRAND))
+
+transactionData <- transactionData %>%
+  mutate(BRAND = if_else(BRAND == "Infzns", "Infuzions", BRAND))
+
+transactionData <- transactionData %>%
+  mutate(BRAND = if_else(BRAND == "WW", "Woolworths", BRAND))
+
+transactionData <- transactionData %>%
+  mutate(BRAND = if_else(BRAND == "NCC", "Natural", BRAND))
+
+transactionData <- transactionData %>%
+  mutate(BRAND = if_else(BRAND == "Dorito", "Doritos", BRAND))
+
+transactionData <- transactionData %>%
+  mutate(BRAND = if_else(BRAND == "Grain", "GrnWves", BRAND))
+
+
+
+#checking the brand names
 unique(transactionData$BRAND)
 
 
@@ -165,8 +189,6 @@ ggplot(sales_summary, aes(x = LIFESTAGE, y = total_sales, fill = PREMIUM_CUSTOME
   ggtitle("Total Sales by LIFESTAGE and PREMIUM_CUSTOMER")
 
 
-View(data)
-library(dplyr)
 
 customer_summary <- data %>%
   group_by(LIFESTAGE, PREMIUM_CUSTOMER) %>%
@@ -189,7 +211,7 @@ unit_summary <- data %>%
 
 
 ggplot(unit_summary, aes(x = LIFESTAGE, y = avg_units_per_customer, fill = PREMIUM_CUSTOMER)) +
-  geom_bar(stat = "identity", position = "dodge") +
+  geom_bar(stat = "identity", position = position_stack(reverse = TRUE)) +
   labs(x = "LIFESTAGE", y = "Average Units per Customer", fill = "PREMIUM_CUSTOMER") +
   ggtitle("Average Units per Customer by LIFESTAGE and PREMIUM_CUSTOMER")
 
@@ -200,27 +222,24 @@ avg_price <- data %>%
 
 
 ggplot(avg_price, aes(x=LIFESTAGE,y= avg_price_, fill = PREMIUM_CUSTOMER))+
-  geom_bar(stat = "identity", position = "dodge") +
+  geom_bar(stat = "identity", position = position_stack(reverse = TRUE)) +
   labs(x="LIFESTAGE", y= "Average Price", fill="PREMIUM_CUSTOMER")+
   ggtitle("Average Price by LIFESTAGE AND PREMIUM_CUSTOMER")
 
-#perform an independent t-test
+#perform an Welch Two-sample
 unique(data$PREMIUM_CUSTOMER)
 unique(data$LIFESTAGE)
 
 
-# Group by LIFESTAGE and PREMIUM_CUSTOMER, and then by BRAND
-grouped_data <- data %>%
-  group_by(LIFESTAGE, PREMIUM_CUSTOMER, BRAND) %>%
-  summarize(avg_units = mean(PROD_QTY))
+data<-data.table(data)
 
-# Print the grouped data
-print(grouped_data)
-# Perform t-test
-result <- t.test(grouped_data$avg_units)
 
-# Print the result
-print(result)
+pricePerUnit <- data[, price := TOT_SALES/PROD_QTY]
+t.test(data[LIFESTAGE %in% c("YOUNG SINGLES/COUPLES", "MIDAGE SINGLES/COUPLES")
+            & PREMIUM_CUSTOMER == "Mainstream", price],
+       data[LIFESTAGE %in% c("YOUNG SINGLES/COUPLES", "MIDAGE SINGLES/COUPLES")
+            & PREMIUM_CUSTOMER != "Mainstream", price], alternative = "greater")
+
 
 
 # Create a contingency table of the two columns
@@ -233,23 +252,26 @@ chi_squared_result <- chisq.test(contingency_table)
 print(chi_squared_result)
 
 
-# Load the arules library
-library(arules)
 
 # Create a transaction matrix of LIFESTAGE and PREMIUM_CUSTOMER
-transactions <- as(split(data$BRAND, data$LIFESTAGE, data$TOT_SALES), "transactions")
-transactions@itemInfo$PREMIUM_CUSTOMER <- data$PREMIUM_CUSTOMER
-
-# Run the Apriori algorithm
-rules <- apriori(transactions, parameter = list(supp = 0.001, conf = 0.8, target = "rules"))
-
-# Filter the rules by the two customer segments of interest
-segment_rules <- subset(rules, subset = lhs %in% c("YOUNG SINGLES/COUPLES", "RETIREES") & rhs %in% c("RRD", "CC", "TS"))
-
-# Sort the rules by decreasing confidence
-segment_rules <- sort(segment_rules, by = "confidence", decreasing = TRUE)
-
-# Print the rules
-inspect(segment_rules)
+# Deep dive into Mainstream, young singles/couples
+segment_ <- data[LIFESTAGE == "YOUNG SINGLES/COUPLES" & PREMIUM_CUSTOMER =="Mainstream",]
+others <- data[!(LIFESTAGE == "YOUNG SINGLES/COUPLES" & PREMIUM_CUSTOMER == "Mainstream"),]
+#### Brand affinity compared to the rest of the population
+quantity_segment <- segment_[, sum(PROD_QTY)]
 
 
+other_quantity <- others[, sum(PROD_QTY)]
+quantity_segment_by_brand <- segment_[, .(targetSegment =sum(PROD_QTY)/quantity_segment), by = BRAND]
+quantity_other_by_brand <- others[, .(others = sum(PROD_QTY)/other_quantity), by= BRAND]
+brand_proportions <- merge(quantity_segment_by_brand, quantity_other_by_brand)[, affinityToBrand := targetSegment/others]
+brand_proportions[order(-affinityToBrand)]
+
+
+# Preferred pack size compared to the rest of the population
+quantity_segment_by_pack <- segment_[, .(targetSegment =sum(PROD_QTY)/quantity_segment), by = PACK_SIZE]
+quantity_other_by_pack <- others[, .(other = sum(PROD_QTY)/other_quantity), by = PACK_SIZE]
+pack_proportions <- merge(quantity_segment_by_pack, quantity_other_by_pack)[,affinityToPack := targetSegment/other]
+pack_proportions[order(-affinityToPack)]
+
+data[PACK_SIZE == 270, unique(PROD_NAME)]
